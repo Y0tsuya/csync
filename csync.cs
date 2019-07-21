@@ -51,6 +51,8 @@
 //			Use more CleanExit() on errors
 //			Add copy/update/delete sum to log
 //			Add eta indicator
+// v6.0.0 - Enable SSL
+//			All exceptions now log with [ERROR] prefix tag
 
 using System;
 using System.Collections.Generic;
@@ -319,7 +321,7 @@ public class XYConsole {
 namespace csync {
 	public class csync {
 
-		static string version = "v5.9.4";
+		static string version = "v6.0.0";
 		static string template =
 @"╔═════════╦═══════════════════════════════════════════════╦═══════╦═════════╦═══════════════╗
 ║ Project ║                                               ║ Paths ║  Files  ║ csync v1.0.0  ║
@@ -599,14 +601,14 @@ namespace csync {
 				dirPaths = new List<string>(Directory.EnumerateDirectories(path));
 			} catch (Exception ex) {
 				LogMessage("[ERROR] Cannot list directories in " + path, MsgType.MSG_ERROR);
-				LogMessage(ex.Message, MsgType.MSG_ERROR);
+				LogMessage("[ERROR] " + ex.Message, MsgType.MSG_ERROR);
 				CleanExit();
 			}
 			try {
 				filePaths = new List<string>(Directory.EnumerateFiles(path));
 			} catch (Exception ex) {
 				LogMessage("[ERROR] Cannot list files in " + path, MsgType.MSG_ERROR);
-				LogMessage(ex.Message, MsgType.MSG_ERROR);
+				LogMessage("[ERROR] " + ex.Message, MsgType.MSG_ERROR);
 				CleanExit();
 			}
 			foreach (string dirPath in dirPaths) {
@@ -668,7 +670,7 @@ namespace csync {
 					Alphaleonis.Win32.Filesystem.Directory.CreateDirectory(targetPath);
 				} catch (Exception ex) {
 					LogMessage("[WARNING] Cannot create destination directory " + targetPath, MsgType.MSG_WARNING);
-					LogMessage(ex.Message, MsgType.MSG_WARNING);
+					LogMessage("[ERROR] " + ex.Message, MsgType.MSG_WARNING);
 					runtimeStatus = Status.Warning;
 					System.Threading.Thread.Sleep(100);
 				}
@@ -677,7 +679,7 @@ namespace csync {
 				Alphaleonis.Win32.Filesystem.File.Move(source, target, Alphaleonis.Win32.Filesystem.MoveOptions.None);
 			} catch (Exception ex) {
 				LogMessage("[WARNING] Cannot move file " + target, MsgType.MSG_WARNING);
-				LogMessage(ex.Message, MsgType.MSG_WARNING);
+				LogMessage("[ERROR] " + ex.Message, MsgType.MSG_WARNING);
 				runtimeStatus = Status.Warning;
 				System.Threading.Thread.Sleep(100);
 			}
@@ -692,7 +694,7 @@ namespace csync {
 					Alphaleonis.Win32.Filesystem.Directory.CreateDirectory(targetPath);
 				} catch (Exception ex) {
 					LogMessage("[WARNING] Cannot create destination directory " + targetPath, MsgType.MSG_WARNING);
-					LogMessage(ex.Message, MsgType.MSG_WARNING);
+					LogMessage("[ERROR] " + ex.Message, MsgType.MSG_WARNING);
 					runtimeStatus = Status.Warning;
 					System.Threading.Thread.Sleep(100);
 				}
@@ -701,7 +703,7 @@ namespace csync {
 				Alphaleonis.Win32.Filesystem.File.Copy(source, target, true);
 			} catch (Exception ex) {
 				LogMessage("[WARNING] Cannot copy file " + target, MsgType.MSG_WARNING);
-				LogMessage(ex.Message, MsgType.MSG_WARNING);
+				LogMessage("[ERROR] " + ex.Message, MsgType.MSG_WARNING);
 				runtimeStatus = Status.Warning;
 				System.Threading.Thread.Sleep(100);
 			}
@@ -713,7 +715,7 @@ namespace csync {
 				Alphaleonis.Win32.Filesystem.File.Delete(target);
 			} catch (Exception ex) {
 				LogMessage("[WARNING] Cannot delete file " + target, MsgType.MSG_WARNING);
-				LogMessage(ex.Message, MsgType.MSG_WARNING);
+				LogMessage("[ERROR] " + ex.Message, MsgType.MSG_WARNING);
 				runtimeStatus = Status.Warning;
 			}
 		}
@@ -1155,7 +1157,7 @@ namespace csync {
 						Directory.Delete(TargetPaths[i], true);
 					} catch (Exception ex) {
 						LogMessage("[WARNING] Cannot delete directory " + TargetPaths[i], MsgType.MSG_WARNING);
-						LogMessage(ex.Message, MsgType.MSG_WARNING);
+						LogMessage("[ERROR] " + ex.Message, MsgType.MSG_WARNING);
 						runtimeStatus = Status.Warning;
 					}
 				}
@@ -1192,6 +1194,7 @@ namespace csync {
 			StreamReader tr = new StreamReader(prjpath);
 			while (!tr.EndOfStream) {
 				buf = tr.ReadLine();
+				buf = buf.Trim();
 				if (buf == "") continue;
 				if (buf[0] == '#') {
 					continue;
@@ -1320,12 +1323,15 @@ namespace csync {
 			if (MatchPathList.Count() > 0) matchPathValid = true;
 		}
 
-		static void SendMail(string host, int port, string from, string to, string subject, string body) {
+		static void SendMail(string host, int port, bool ssl, string user, string pass, string from, string to, string subject, string body) {
 			SmtpClient client = new SmtpClient(host, port);
 			MailAddress addrFrom = new MailAddress(from, "cSync", System.Text.Encoding.UTF8);
 			MailAddress addrTo = new MailAddress(to, to, System.Text.Encoding.UTF8);
 			MailMessage message = new MailMessage(addrFrom, addrTo);
-//			client.Credentials = new NetworkCredential("admin@ikkokkan.com","K@nr1n1n");
+			client.EnableSsl = ssl;
+			if ((user != "") && (pass != "")) {
+				client.Credentials = new NetworkCredential(user, pass);
+			}
 			client.ServicePoint.MaxIdleTime = 2;
 			message.Subject = subject;
 			message.SubjectEncoding = System.Text.Encoding.UTF8;
@@ -1335,20 +1341,20 @@ namespace csync {
 				client.Send(message);
 			}
 			catch (ArgumentNullException ex) {
-				LogMessage(ex.Message, MsgType.MSG_ERROR);
+				LogMessage("[ERROR] " + ex.Message, MsgType.MSG_ERROR);
 			}
 			catch (ObjectDisposedException ex) {
-				LogMessage(ex.Message, MsgType.MSG_ERROR);
+				LogMessage("[ERROR] " + ex.Message, MsgType.MSG_ERROR);
 			}
 			catch (SmtpFailedRecipientsException ex) {
-				LogMessage(ex.Message, MsgType.MSG_ERROR);
+				LogMessage("[ERROR] " + ex.Message, MsgType.MSG_ERROR);
 			}
 			catch (SmtpException ex) {
-				LogMessage(ex.Message, MsgType.MSG_ERROR);
+				LogMessage("[ERROR] " + ex.Message, MsgType.MSG_ERROR);
 //				LogMessage(ex.InnerException.Message, MsgType.MSG_ERROR);
 			}
 			catch (Exception ex) {
-				LogMessage(ex.Message, MsgType.MSG_ERROR);
+				LogMessage("[ERROR] " + ex.Message, MsgType.MSG_ERROR);
 			}
 			client.Dispose();
 			message.Dispose();
@@ -1365,7 +1371,7 @@ namespace csync {
 			}
 
 			catch (Exception ex) {
-				LogMessage(ex.Message, MsgType.MSG_ERROR);
+				LogMessage("[ERROR] " + ex.Message, MsgType.MSG_ERROR);
 				CleanExit();
 			}
 		}
@@ -1438,9 +1444,9 @@ namespace csync {
 			if (network) {
 				LogMessage("[INFO] Sending notification email");
 				if (attachLog) {
-					SendMail(mailserver, netport, mailfrom, mailto, "cSync " + projectFile + status, mailbody);
+					SendMail(mailserver, netport, ssl, netuser, netpass, mailfrom, mailto, "cSync " + projectFile + status, mailbody);
 				} else {
-					SendMail(mailserver, netport, mailfrom, mailto, "cSync " + projectFile + status, "See Log File for details");
+					SendMail(mailserver, netport, ssl, netuser, netpass, mailfrom, mailto, "cSync " + projectFile + status, "See Log File for details");
 				}
 			}
 			if (log) {
@@ -1485,7 +1491,7 @@ namespace csync {
 			try {
 				fs = new FileStream(filename, FileMode.Create);
 			} catch (Exception ex) {
-				LogMessage(ex.Message, MsgType.MSG_ERROR);
+				LogMessage("[ERROR] " + ex.Message, MsgType.MSG_ERROR);
 				CleanExit();
 				return;
 			}
@@ -1504,7 +1510,7 @@ namespace csync {
 			try {
 				fs = new FileStream(filename, FileMode.Open);
 			} catch (Exception ex) {
-				LogMessage(ex.Message, MsgType.MSG_ERROR);
+				LogMessage("[ERROR] " + ex.Message, MsgType.MSG_ERROR);
 				CleanExit();
 				return;
 			}
@@ -1597,7 +1603,7 @@ namespace csync {
 						File.Delete(scanFile);
 					}
 				} catch (Exception ex) {
-					LogMessage(ex.Message, MsgType.MSG_ERROR);
+					LogMessage("[ERROR] " + ex.Message, MsgType.MSG_ERROR);
 					CleanExit();
 				}
 			}
