@@ -53,6 +53,11 @@
 //			Add eta indicator
 // v6.0.0 - Enable SSL
 //			All exceptions now log with [ERROR] prefix tag
+// v6.1.0 - Fix non-AlphaFS calls
+// v6.1.1 - Skip NULL MD5 when finding dupes
+// v6.1.2 - Fix SaveScan/CleanExit exception loop
+// v6.1.3 - Fix divide-by-zero print error
+// v6.1.4 - Close stream handle when it exists on writes
 
 using System;
 using System.Collections.Generic;
@@ -180,6 +185,7 @@ public class MD5Alpha {
 			return false;
 		}
 		if (handle != 0xFFFFFFFF) {
+			CloseHandle(handle);
 			return false;
 		}
 		genhash = Generate(filename);
@@ -318,10 +324,45 @@ public class XYConsole {
 	}
 }
 
+class ProgressPrinter {
+	private int last_percent;
+	XYConsole.XYStringParam GraphXY, PercentXY;
+	XYConsole Con;
+
+	public ProgressPrinter(XYConsole console, XYConsole.XYStringParam graph_xy, XYConsole.XYStringParam percent_xy) {
+		last_percent = -1;
+		GraphXY = graph_xy;
+		PercentXY = percent_xy;
+		Con = console;
+	}
+
+	public void Start() {
+		Print(0);
+	}
+
+	public void Print(int percent) {
+		int ticks;
+		string buf;
+
+		if (percent != last_percent) {
+			last_percent = percent;
+			ticks = percent * GraphXY.Lim / 100;
+			buf = new string('*', ticks);
+			Con.WriteAt(GraphXY, buf, ConsoleColor.Magenta);
+			Con.WriteAt(PercentXY, percent.ToString() + '%', ConsoleColor.Magenta);
+		}
+	}
+
+	public void Stop() {
+		Print(100);
+		Console.WriteLine("");
+	}
+}
+
 namespace csync {
 	public class csync {
 
-		static string version = "v6.0.0";
+		static string version = "v6.1.4";
 		static string template =
 @"╔═════════╦═══════════════════════════════════════════════╦═══════╦═════════╦═══════════════╗
 ║ Project ║                                               ║ Paths ║  Files  ║ csync v1.0.0  ║
@@ -598,14 +639,14 @@ namespace csync {
 			dirPaths = null;
 			filePaths = null;
 			try {
-				dirPaths = new List<string>(Directory.EnumerateDirectories(path));
+				dirPaths = new List<string>(Alphaleonis.Win32.Filesystem.Directory.EnumerateDirectories(path));
 			} catch (Exception ex) {
 				LogMessage("[ERROR] Cannot list directories in " + path, MsgType.MSG_ERROR);
 				LogMessage("[ERROR] " + ex.Message, MsgType.MSG_ERROR);
 				CleanExit();
 			}
 			try {
-				filePaths = new List<string>(Directory.EnumerateFiles(path));
+				filePaths = new List<string>(Alphaleonis.Win32.Filesystem.Directory.EnumerateFiles(path));
 			} catch (Exception ex) {
 				LogMessage("[ERROR] Cannot list files in " + path, MsgType.MSG_ERROR);
 				LogMessage("[ERROR] " + ex.Message, MsgType.MSG_ERROR);
@@ -628,7 +669,7 @@ namespace csync {
 			foreach (string filePath in filePaths) {
 				System.IO.FileAttributes fileAttributes = System.IO.FileAttributes.Normal;
 
-				fileName = Path.GetFileName(filePath);
+				fileName = Alphaleonis.Win32.Filesystem.Path.GetFileName(filePath);
 				try {
 					fileAttributes = Alphaleonis.Win32.Filesystem.File.GetAttributes(filePath);
 				} catch (Exception ex) {
@@ -664,8 +705,8 @@ namespace csync {
 		static void MoveFile(string source, string target) {
 			string targetPath;
 
-			targetPath = Path.GetDirectoryName(target);
-			if (!Directory.Exists(targetPath)) {
+			targetPath = Alphaleonis.Win32.Filesystem.Path.GetDirectoryName(target);
+			if (!Alphaleonis.Win32.Filesystem.Directory.Exists(targetPath)) {
 				try {
 					Alphaleonis.Win32.Filesystem.Directory.CreateDirectory(targetPath);
 				} catch (Exception ex) {
@@ -688,8 +729,8 @@ namespace csync {
 		static void CopyFile(string source, string target) {
 			string targetPath;
 
-			targetPath = Path.GetDirectoryName(target);
-			if (!Directory.Exists(targetPath)) {
+			targetPath = Alphaleonis.Win32.Filesystem.Path.GetDirectoryName(target);
+			if (!Alphaleonis.Win32.Filesystem.Directory.Exists(targetPath)) {
 				try {
 					Alphaleonis.Win32.Filesystem.Directory.CreateDirectory(targetPath);
 				} catch (Exception ex) {
@@ -720,41 +761,6 @@ namespace csync {
 			}
 		}
 
-		class ProgressPrinter {
-			private int last_percent;
-			XYConsole.XYStringParam GraphXY, PercentXY;
-			XYConsole Con;
-
-			public ProgressPrinter(XYConsole console, XYConsole.XYStringParam graph_xy, XYConsole.XYStringParam percent_xy) {
-				last_percent = -1;
-				GraphXY = graph_xy;
-				PercentXY = percent_xy;
-				Con = console;
-			}
-
-			public void Start() {
-				Print(0);
-			}
-
-			public void Print(int percent) {
-				int i, ticks;
-				string buf;
-
-				if (percent != last_percent) {
-					last_percent = percent;
-					ticks = percent * GraphXY.Lim / 100;
-					buf = new string('*', ticks);
-					Con.WriteAt(GraphXY, buf, ConsoleColor.Magenta);
-					Con.WriteAt(PercentXY, percent.ToString() + '%', ConsoleColor.Magenta);
-				}
-			}
-
-			public void Stop() {
-				Print(100);
-				Console.WriteLine("");
-			}
-		}
-
 		static void ScanTree(string scanFile) {
 			Thread sourceScanThread, targetScanThread;
 			bool sourceAlive, targetAlive;
@@ -769,7 +775,7 @@ namespace csync {
 			LogMessage("[PHASE] Scanning");
 			myXYConsole.WriteAt(PhaseXY, "SCAN", ConsoleColor.Green);
 			phasetime.Start();
-			if (File.Exists(scanFile)) {
+			if (Alphaleonis.Win32.Filesystem.File.Exists(scanFile)) {
 				LoadScan(scanFile);
 				buf = String.Format("[INFO] {0} source files scanned in {1} directories", SourceTable.Count(), SourcePaths.Count());
 				LogMessage(buf);
@@ -827,7 +833,7 @@ namespace csync {
 
 			items = hashLookup.Count();
 			if (exitRequested) return;
-			/*			if (!File.Exists(dumpFile)) {
+			/*			if (!Alphaleonis.Win32.Filesystem.File.Exists(dumpFile)) {
 							LogMessage("[ERROR] Cannot open " + dumpFile + " for writing.", MsgType.MSG_ERROR);
 							CleanExit();
 							return;
@@ -846,6 +852,7 @@ namespace csync {
 				i++;
 				progress.Print(i / items);
 				if (itemList.Count() > 1) {
+					if (itemList.ElementAt(0).MD5 == null) continue;	// skip null MD5
 					foreach (FileTableItem item in itemList) {
 						tw.Write(item.Filename + "\t" + item.Size + "\t");
 					}
@@ -1037,12 +1044,14 @@ namespace csync {
 				myXYConsole.WriteAt(ByteXY, EncodeByteSize(runningSum) + "/" + EncodeByteSize(updateSum+copySum), ConsoleColor.Magenta);
 				myXYConsole.WriteAt(IndexXY, (i + 1) + "/" + (UpdateList.Count() + CopyList.Count()), ConsoleColor.Magenta);
 				elapsed = phasetime.Elapsed - phaseStart;
-				totalTicks = (long)((double)(updateSum + copySum) / (double)(runningSum) * elapsed.Ticks);
+				totalTicks = (long)(((double)(updateSum + copySum) / (double)(runningSum)) * elapsed.Ticks);
 				ETA = new TimeSpan(totalTicks - elapsed.Ticks);
 				myXYConsole.WriteAt(EstimateXY, ETA.ToString(), ConsoleColor.Cyan);
 				TargetTable[UpdateList[i].Target.Index] = SourceTable[UpdateList[i].Source.Index];
 				TargetTable[UpdateList[i].Target.Index].Index = UpdateList[i].Target.Index;
-				progress.Print((int)((100 * runningSum) / updateSum));
+				if (updateSum > 0) {
+					progress.Print((int)((100 * runningSum) / updateSum));
+				}
 			}
 			progress.Stop();
 			buf = String.Format("[COPYSYNC] {0} transferred during update phase", EncodeByteSize(updateSum));
@@ -1068,12 +1077,14 @@ namespace csync {
 				myXYConsole.WriteAt(ByteXY, EncodeByteSize(updateSum + runningSum) + "/" + EncodeByteSize(updateSum + copySum), ConsoleColor.Magenta);
 				myXYConsole.WriteAt(IndexXY, (i + UpdateList.Count() + 1) + "/" + (UpdateList.Count() + CopyList.Count()), ConsoleColor.Magenta);
 				elapsed = phasetime.Elapsed - phaseStart;
-				totalTicks = (long)((double)(updateSum + copySum)/(double)(runningSum + updateSum) * elapsed.Ticks);
+				totalTicks = (long)(((double)(updateSum + copySum)/(double)(runningSum + updateSum)) * elapsed.Ticks);
 				ETA = new TimeSpan(totalTicks - elapsed.Ticks);
 				myXYConsole.WriteAt(EstimateXY, ETA.ToString(), ConsoleColor.Cyan);
 				TargetTable.Add(SourceTable[CopyList[i].Source.Index]);
 				TargetTable[TargetTable.Count() - 1].Index = TargetTable.Count() - 1;
-				progress.Print((int)((100 * runningSum) / copySum));
+				if (copySum > 0) {
+					progress.Print((int)((100 * runningSum) / copySum));
+				}
 			}
 			progress.Stop();
 			buf = String.Format("[COPYSYNC] {0} transferred during copy phase", EncodeByteSize(copySum));
@@ -1154,7 +1165,7 @@ namespace csync {
 					LogMessage("[DELTREE] " + TargetPaths[i]);
 					try {
 						myXYConsole.WriteAt(TargetXY, TargetPaths[i], ConsoleColor.Green);
-						Directory.Delete(TargetPaths[i], true);
+						Alphaleonis.Win32.Filesystem.Directory.Delete(TargetPaths[i], true);
 					} catch (Exception ex) {
 						LogMessage("[WARNING] Cannot delete directory " + TargetPaths[i], MsgType.MSG_WARNING);
 						LogMessage("[ERROR] " + ex.Message, MsgType.MSG_WARNING);
@@ -1186,7 +1197,7 @@ namespace csync {
 			char[] delims = new char[] { '=' };
 			string[] tokens;
 
-			if (!File.Exists(prjpath)) {
+			if (!Alphaleonis.Win32.Filesystem.File.Exists(prjpath)) {
 				LogMessage("[ERROR] Project file " + prjpath + " not found.", MsgType.MSG_ERROR);
 				LogMessage("Exiting...", MsgType.MSG_ERROR);
 				CleanExit();
@@ -1414,14 +1425,14 @@ namespace csync {
 				}
 			}
 			foreach (string path in sources) {
-				if (!Directory.Exists(path)) {
+				if (!Alphaleonis.Win32.Filesystem.Directory.Exists(path)) {
 					LogMessage("[ERROR] Source dir not found: " + path, MsgType.MSG_ERROR);
 					LogMessage("Exiting...", MsgType.MSG_ERROR);
 					CleanExit();
 				}
 			}
 			foreach (string path in targets) {
-				if (!Directory.Exists(path)) {
+				if (!Alphaleonis.Win32.Filesystem.Directory.Exists(path)) {
 					LogMessage("[ERROR] Target dir not found: " + path, MsgType.MSG_ERROR);
 					LogMessage("Exiting...", MsgType.MSG_ERROR);
 					CleanExit();
@@ -1450,7 +1461,7 @@ namespace csync {
 				}
 			}
 			if (log) {
-				logfile = logpath + "\\csync " + Path.GetFileNameWithoutExtension(projectFile) + " " + DateTime.Now.ToString(datepat) + status + ".log";
+				logfile = logpath + "\\csync " + Alphaleonis.Win32.Filesystem.Path.GetFileNameWithoutExtension(projectFile) + " " + DateTime.Now.ToString(datepat) + status + ".log";
 				LogMessage("[INFO] Saving log file " + logfile);
 				SaveLog(logfile, logbody);
 			}
@@ -1462,7 +1473,7 @@ namespace csync {
 		}
 
 		static void PrintHelp() {
-			myXYConsole.AddLog("cSync " + version + " - (C)2002-2018 Bo-Yi Lin", ConsoleColor.Red);
+			myXYConsole.AddLog("cSync " + version + " - (C)2002-2020 Bo-Yi Lin", ConsoleColor.Red);
 			myXYConsole.AddLog("syntax: cSync -p [prjpath] -l verbosity -t", ConsoleColor.Red);
 			myXYConsole.AddLog("verbosity: INFO, WARNING, ERROR", ConsoleColor.Red);
 			myXYConsole.AddLog("-t: touch newer dest file to source timestamp", ConsoleColor.Red);
@@ -1492,7 +1503,7 @@ namespace csync {
 				fs = new FileStream(filename, FileMode.Create);
 			} catch (Exception ex) {
 				LogMessage("[ERROR] " + ex.Message, MsgType.MSG_ERROR);
-				CleanExit();
+//				CleanExit();
 				return;
 			}
 			bf.Serialize(fs, SourcePaths);
@@ -1579,13 +1590,15 @@ namespace csync {
 				TargetTable.Clear();
 				sourceRoot = SourceTargetList[i].Source;
 				targetRoot = SourceTargetList[i].Target;
-				scanFile = Path.GetFileNameWithoutExtension(projectFile) + ".scan" + i.ToString();
+				scanFile =
+					Alphaleonis.Win32.Filesystem.Path.GetDirectoryName(Alphaleonis.Win32.Filesystem.Path.GetFullPath(projectFile))
+					+ "\\" + Alphaleonis.Win32.Filesystem.Path.GetFileNameWithoutExtension(projectFile) + ".scan" + i.ToString();
 				ScanTree(scanFile);
 				SourceByName = SourceTable.ToLookup(t => t.Filename);
 				SourceByHash = SourceTable.ToLookup(t => t.MD5string);
 				TargetByName = TargetTable.ToLookup(t => t.Filename);
 				TargetByHash = TargetTable.ToLookup(t => t.MD5string);
-				if (log) dupefile = logpath + "\\csync " + Path.GetFileNameWithoutExtension(projectFile) + " dupes.txt";
+				if (log) dupefile = logpath + "\\csync " + Alphaleonis.Win32.Filesystem.Path.GetFileNameWithoutExtension(projectFile) + " dupes.txt";
 				else dupefile = sourceRoot + "\\dupes.txt";
 				FindDupes(SourceByHash, dupefile);
 				MoveSync();
@@ -1600,7 +1613,7 @@ namespace csync {
 						SaveScan(scanFile);
 					} else {
 						LogMessage("[INFO] Delete scan file " + scanFile);
-						File.Delete(scanFile);
+						Alphaleonis.Win32.Filesystem.File.Delete(scanFile);
 					}
 				} catch (Exception ex) {
 					LogMessage("[ERROR] " + ex.Message, MsgType.MSG_ERROR);
